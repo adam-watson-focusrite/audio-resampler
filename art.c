@@ -673,14 +673,14 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
             samples_to_append -= samples_to_append_now;
         }
 
-        if (inbits <= 8) {
+/*        if (inbits <= 8) {
             float gain_factor = gain / 128.0;
             int i;
 
             for (i = 0; i < samples_read * num_channels; ++i)
                 inbuffer [i] = ((int) tmpbuffer [i] - 128) * gain_factor;
         }
-        else if (inbits <= 16) {
+        else */if (inbits <= 16) {
             float gain_factor = gain / 32768.0;
             int i, j;
 
@@ -690,7 +690,7 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
                 inbuffer [i] = value * gain_factor;
             }
         }
-        else if (inbits <= 24) {
+/*        else if (inbits <= 24) {
             float gain_factor = gain / 8388608.0;
             int i, j;
 
@@ -718,24 +718,24 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
             if (gain != 1.0)
                 for (int i = 0; i < samples_read * num_channels; ++i)
                     inbuffer [i] *= gain;
-        }
+        }*/
 
         // common code to process the audio in 32-bit floats
 
-        if (pre_filter)
+/*        if (pre_filter)
             for (int i = 0; i < num_channels; ++i) {
                 biquad_apply_buffer (&lowpass [i] [0], inbuffer + i, samples_read, num_channels);
                 biquad_apply_buffer (&lowpass [i] [1], inbuffer + i, samples_read, num_channels);
-            }
+            }*/
 
         res = resampleProcessInterleaved (resampler, inbuffer, samples_read, outbuffer, outbuffer_samples, sample_ratio);
         samples_generated = res.output_generated;
 
-        if (post_filter)
+/*        if (post_filter)
             for (int i = 0; i < num_channels; ++i) {
                 biquad_apply_buffer (&lowpass [i] [0], outbuffer + i, samples_generated, num_channels);
                 biquad_apply_buffer (&lowpass [i] [1], outbuffer + i, samples_generated, num_channels);
-            }
+            }*/
 
         // finally write the audio, converting to appropriate integer format if requested
 
@@ -773,7 +773,7 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
 
             fwrite (tmpbuffer, num_channels * ((outbits + 7) / 8), samples_generated, outfile);
         }
-        else {
+/*        else {
             if (IS_BIG_ENDIAN) {
                 unsigned char *bptr = (unsigned char *) outbuffer, word [4];
                 int wcount = samples_generated * num_channels;
@@ -788,7 +788,7 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
             }
 
             fwrite (outbuffer, num_channels * sizeof (float), samples_generated, outfile);
-        }
+        }*/
 
         output_samples += samples_generated;
 
