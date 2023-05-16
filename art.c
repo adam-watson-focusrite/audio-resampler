@@ -62,6 +62,12 @@ typedef struct
 	int num_filters;
 	double phase_shift;
 	double gain;
+
+	double sample_ratio;
+    double lowpass_ratio;
+
+    FILE* in_stream;
+    FILE* out_stream;
 }process_context_t;
 
 static process_context_t process_context;
@@ -250,7 +256,7 @@ typedef struct {
 #define WAVE_FORMAT_IEEE_FLOAT  0x3
 #define WAVE_FORMAT_EXTENSIBLE  0xfffe
 
-static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sample_rate,unsigned long num_samples);
+static unsigned int process_audio(unsigned long sample_rate,unsigned long num_samples);
 
 static int write_pcm_wav_header (FILE *outfile, int bps, int num_channels, unsigned long num_samples, unsigned long sample_rate, uint32_t channel_mask);
 static void little_endian_to_native (void *data, char *format);
@@ -466,7 +472,10 @@ static int wav_process (char *infilename, char *outfilename)
         return -1;
     }
 
-    unsigned int output_samples = process_audio (infile, outfile, process_context.sample_rate, num_samples);
+    process_context.in_stream = infile;
+    process_context.out_stream = outfile;
+
+    unsigned int output_samples = process_audio (process_context.sample_rate, num_samples);
 
     rewind (outfile);
 
@@ -526,11 +535,23 @@ static void tpdf_dither_free (void)
 
 #define BUFFER_SAMPLES          4096
 
-static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sample_rate,unsigned long num_samples)
+size_t fread_stream(void * buffer, size_t size, size_t count)
 {
-    double sample_ratio = (double) process_context.resample_rate / process_context.sample_rate, lowpass_ratio = 1.0;
+	return fread(buffer,size,count,process_context.in_stream);
+}
 
-    unsigned int outbuffer_samples = (int) floor (BUFFER_SAMPLES * sample_ratio * 1.1 + 100.0);
+size_t fwrite_stream(void * buffer, size_t size, size_t count)
+{
+	return fwrite(buffer,size,count,process_context.out_stream);
+}
+
+static unsigned int process_audio (unsigned long sample_rate,unsigned long num_samples)
+{
+
+	process_context.sample_ratio = (double) process_context.resample_rate / (double)process_context.sample_rate;
+	process_context.lowpass_ratio = 1.0;
+
+    unsigned int outbuffer_samples = (int) floor (BUFFER_SAMPLES * process_context.sample_ratio * 1.1 + 100.0);
     unsigned long remaining_samples = num_samples, output_samples = 0, clipped_samples = 0;
 
     float *outbuffer = malloc (outbuffer_samples * num_channels * sizeof (float));
@@ -549,22 +570,22 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
     // when downsampling, calculate the optimum lowpass based on resample filter
     // length (i.e., more taps allow us to lowpass closer to Nyquist)
 
-    if (sample_ratio < 1.0) {
-        lowpass_ratio -= (10.24 / process_context.num_taps);
+    if (process_context.sample_ratio < 1.0) {
+    	process_context.lowpass_ratio -= (10.24 / process_context.num_taps);
 
-        if (lowpass_ratio < 0.84)           // limit the lowpass for very short filters
-            lowpass_ratio = 0.84;
+        if (process_context.lowpass_ratio < 0.84)           // limit the lowpass for very short filters
+        	process_context.lowpass_ratio = 0.84;
 
-        if (lowpass_ratio < sample_ratio)   // avoid discontinuities near unity sample ratios
-            lowpass_ratio = sample_ratio;
+        if (process_context.lowpass_ratio < process_context.sample_ratio)   // avoid discontinuities near unity sample ratios
+        	process_context.lowpass_ratio = process_context.sample_ratio;
     }
 
-    fprintf (stderr, "sample_ratio: %0.6f, (resample_rate %d / sample_rate %d)\n",sample_ratio, process_context.resample_rate, process_context.sample_rate);
+    fprintf (stderr, "sample_ratio: %0.6f, (resample_rate %d / sample_rate %d)\n",process_context.sample_ratio, process_context.resample_rate, process_context.sample_rate);
 
     if (process_context.lowpass_freq) {
         double user_lowpass_ratio;
 
-        if (sample_ratio < 1.0)
+        if (process_context.sample_ratio < 1.0)
             user_lowpass_ratio = process_context.lowpass_freq / (process_context.resample_rate / 2.0);
         else
             user_lowpass_ratio = process_context.lowpass_freq / (sample_rate / 2.0);
@@ -572,14 +593,14 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
         if (user_lowpass_ratio >= 1.0)
             fprintf (stderr, "warning: ignoring invalid lowpass frequency specification (at or over Nyquist)\n");
         else
-            lowpass_ratio = user_lowpass_ratio;
+        	process_context.lowpass_ratio = user_lowpass_ratio;
     }
 
     if (bh4_window || !hann_window)
         flags |= BLACKMAN_HARRIS;
 
-    if (lowpass_ratio * sample_ratio < 0.98 && pre_post_filter) {
-        double cutoff = lowpass_ratio * sample_ratio / 2.0;
+    if (process_context.lowpass_ratio * process_context.sample_ratio < 0.98 && pre_post_filter) {
+        double cutoff = process_context.lowpass_ratio * process_context.sample_ratio / 2.0;
         biquad_lowpass (&lowpass_coeff, cutoff);
         pre_filter = 1;
 
@@ -587,17 +608,17 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
             fprintf (stderr, "cascaded biquad pre-filter at %g Hz\n", sample_rate * cutoff);
     }
 
-    if (sample_ratio < 1.0) {
-        resampler = resampleInit (num_channels, process_context.num_taps, process_context.num_filters, sample_ratio * lowpass_ratio, flags | INCLUDE_LOWPASS);
+    if (process_context.sample_ratio < 1.0) {
+        resampler = resampleInit (num_channels, process_context.num_taps, process_context.num_filters, process_context.sample_ratio * process_context.lowpass_ratio, flags | INCLUDE_LOWPASS);
 
         if (verbosity > 0)
-            fprintf (stderr, "%d-tap sinc downsampler with lowpass at %g Hz\n", process_context.num_taps, sample_ratio * lowpass_ratio * sample_rate / 2.0);
+            fprintf (stderr, "%d-tap sinc downsampler with lowpass at %g Hz\n", process_context.num_taps, process_context.sample_ratio * process_context.lowpass_ratio * process_context.sample_rate / 2.0);
     }
-    else if (lowpass_ratio < 1.0) {
-        resampler = resampleInit (num_channels, process_context.num_taps, process_context.num_filters, lowpass_ratio, flags | INCLUDE_LOWPASS);
+    else if (process_context.lowpass_ratio < 1.0) {
+        resampler = resampleInit (num_channels, process_context.num_taps, process_context.num_filters, process_context.lowpass_ratio, flags | INCLUDE_LOWPASS);
 
         if (verbosity > 0)
-            fprintf (stderr, "%d-tap sinc resampler with lowpass at %g Hz\n", process_context.num_taps, lowpass_ratio * sample_rate / 2.0);
+            fprintf (stderr, "%d-tap sinc resampler with lowpass at %g Hz\n", process_context.num_taps, process_context.lowpass_ratio * sample_rate / 2.0);
     }
     else {
         resampler = resampleInit (num_channels, process_context.num_taps, process_context.num_filters, 1.0, flags);
@@ -606,8 +627,8 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
             fprintf (stderr, "%d-tap pure sinc resampler (no lowpass), %g Hz Nyquist\n", process_context.num_taps, sample_rate / 2.0);
     }
 
-    if (lowpass_ratio / sample_ratio < 0.98 && pre_post_filter && !pre_filter) {
-        double cutoff = lowpass_ratio / sample_ratio / 2.0;
+    if (process_context.lowpass_ratio / process_context.sample_ratio < 0.98 && pre_post_filter && !pre_filter) {
+        double cutoff = process_context.lowpass_ratio / process_context.sample_ratio / 2.0;
         biquad_lowpass (&lowpass_coeff, cutoff);
         post_filter = 1;
 
@@ -655,16 +676,19 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
 
         // first we read the audio data, converting to 32-bit float (if not already) and applying gain
 
-        unsigned long samples_to_read = remaining_samples, samples_read, samples_generated;
+        unsigned long samples_to_read = remaining_samples, stream_samples_read, samples_generated;
         ResampleResult res;
 
         if (samples_to_read > BUFFER_SAMPLES)
             samples_to_read = BUFFER_SAMPLES;
 
-        samples_read = fread (readbuffer, num_channels * ((inbits + 7) / 8), samples_to_read, infile);
-        remaining_samples -= samples_read;
+        int stream_read_size = num_channels * ((inbits + 7) / 8);
 
-        if (!samples_read) {
+        stream_samples_read = fread_stream(readbuffer, stream_read_size, samples_to_read);
+
+        remaining_samples -= stream_samples_read;
+
+        if (!stream_samples_read) {
             int samples_to_append_now = samples_to_append;
 
             if (!samples_to_append_now)
@@ -674,7 +698,7 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
                 samples_to_append_now = BUFFER_SAMPLES;
 
             memset (readbuffer, (inbits <= 8) * 128, samples_to_append_now * num_channels * ((inbits + 7) / 8));
-            samples_read = samples_to_append_now;
+            stream_samples_read = samples_to_append_now;
             samples_to_append -= samples_to_append_now;
         }
 
@@ -682,14 +706,14 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
             float gain_factor = process_context.gain / 128.0;
             int i;
 
-            for (i = 0; i < samples_read * num_channels; ++i)
+            for (i = 0; i < stream_samples_read * num_channels; ++i)
                 inbuffer [i] = ((int) tmpbuffer [i] - 128) * gain_factor;
         }
         else if (inbits <= 16) {
             float gain_factor = process_context.gain / 32768.0;
             int i, j;
 
-            for (i = j = 0; i < samples_read * num_channels; ++i) {
+            for (i = j = 0; i < stream_samples_read * num_channels; ++i) {
                 int16_t value = tmpbuffer [j++];
                 value += tmpbuffer [j++] << 8;
                 inbuffer [i] = value * gain_factor;
@@ -699,7 +723,7 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
             float gain_factor = process_context.gain / 8388608.0;
             int i, j;
 
-            for (i = j = 0; i < samples_read * num_channels; ++i) {
+            for (i = j = 0; i < stream_samples_read * num_channels; ++i) {
                 int32_t value = tmpbuffer [j++];
                 value += tmpbuffer [j++] << 8;
                 value += (int32_t) (signed char) tmpbuffer [j++] << 16;
@@ -709,7 +733,7 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
         else {
             if (IS_BIG_ENDIAN) {
                 unsigned char *bptr = (unsigned char *) inbuffer, word [4];
-                int wcount = samples_read * num_channels;
+                int wcount = stream_samples_read * num_channels;
 
                 while (wcount--) {
                     memcpy (word, bptr, 4);
@@ -721,7 +745,7 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
             }
 
             if (process_context.gain != 1.0)
-                for (int i = 0; i < samples_read * num_channels; ++i)
+                for (int i = 0; i < stream_samples_read * num_channels; ++i)
                     inbuffer [i] *= process_context.gain;
         }
 
@@ -729,11 +753,11 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
 
         if (pre_filter)
             for (int i = 0; i < num_channels; ++i) {
-                biquad_apply_buffer (&lowpass [i] [0], inbuffer + i, samples_read, num_channels);
-                biquad_apply_buffer (&lowpass [i] [1], inbuffer + i, samples_read, num_channels);
+                biquad_apply_buffer (&lowpass [i] [0], inbuffer + i, stream_samples_read, num_channels);
+                biquad_apply_buffer (&lowpass [i] [1], inbuffer + i, stream_samples_read, num_channels);
             }
 
-        res = resampleProcessInterleaved (resampler, inbuffer, samples_read, outbuffer, outbuffer_samples, sample_ratio);
+        res = resampleProcessInterleaved (resampler, inbuffer, stream_samples_read, outbuffer, outbuffer_samples, process_context.sample_ratio);
         samples_generated = res.output_generated;
 
         if (post_filter)
@@ -776,7 +800,9 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
                 }
             }
 
-            fwrite (tmpbuffer, num_channels * ((outbits + 7) / 8), samples_generated, outfile);
+            int stream_write_size = num_channels * ((outbits + 7) / 8);
+
+            fwrite_stream (tmpbuffer, stream_write_size, samples_generated);
         }
 /*        else {
             if (IS_BIG_ENDIAN) {
