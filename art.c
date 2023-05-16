@@ -554,6 +554,8 @@ static unsigned int process_audio (FILE *infile, FILE *outfile, unsigned long sa
             lowpass_ratio = sample_ratio;
     }
 
+    fprintf (stderr, "sample_ratio: %0.6f, (resample_rate %d / sample_rate %d)\n",sample_ratio, resample_rate, sample_rate);
+
     if (lowpass_freq) {
         double user_lowpass_ratio;
 
