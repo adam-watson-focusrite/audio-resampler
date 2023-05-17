@@ -72,7 +72,7 @@ static size_t fwrite_stream(void * buffer, size_t size, size_t count)
 	return fwrite(buffer,size,count,process_context.out_stream);
 }
 
-unsigned int process_audio_init()
+uint16_t process_audio_init()
 {
 	process_context.interpolate = 1;
 
@@ -202,7 +202,7 @@ unsigned int process_audio_init()
     return 0;
 }
 
-unsigned int process_audio_deinit()
+uint16_t process_audio_deinit()
 {
     resampleFree (process_context.resampler);
     tpdf_dither_free ();
@@ -211,7 +211,7 @@ unsigned int process_audio_deinit()
     free (process_context.tmpbuffer);
 
     if (process_context.clipped_samples)
-        fprintf (stderr, "warning: %lu samples were clipped, suggest reducing gain!\n", process_context.clipped_samples);
+        fprintf (stderr, "warning: %u samples were clipped, suggest reducing gain!\n", process_context.clipped_samples);
 
     if (process_context.remaining_samples)
         fprintf (stderr, "warning: file terminated early!\n");
@@ -219,7 +219,7 @@ unsigned int process_audio_deinit()
     return process_context.output_samples;
 }
 
-unsigned int process_audio_block (uint32_t stream_samples_read)
+uint16_t process_audio_block (uint32_t stream_samples_read)
 {
     ResampleResult res;
 	if (process_context.inbits <= 8) {
@@ -327,7 +327,7 @@ unsigned int process_audio_block (uint32_t stream_samples_read)
 	return samples_generated;
 }
 
-unsigned int process_audio()
+uint16_t process_audio()
 {
 	process_audio_init();
 

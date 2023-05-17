@@ -5,47 +5,51 @@
 #include <ctype.h>
 #include <math.h>
 
+#define IS_BIG_ENDIAN (*(uint16_t *)"\0\xff" < 0x0100)
+
 #define ART_STREAM_NUM_CHANNELS 2
+#define BUFFER_SAMPLES          441
+
 typedef struct
 {
 	uint32_t resample_rate;
 	uint32_t sample_rate;
 	uint32_t lowpass_freq;
-	int num_taps;
-	int num_filters;
+	uint16_t num_taps;
+	uint16_t num_filters;
 	double phase_shift;
 	double gain;
 
 	double sample_ratio;
     double lowpass_ratio;
 
-    unsigned int outbuffer_samples;
-    unsigned long remaining_samples;
-    unsigned long output_samples;
-    unsigned long clipped_samples;
-    unsigned long num_samples;
+    uint32_t outbuffer_samples;
+    uint32_t remaining_samples;
+    uint32_t output_samples;
+    uint32_t clipped_samples;
+    uint32_t num_samples;
 
     float *outbuffer;
     float *inbuffer;
-    unsigned char *tmpbuffer;
+    uint8_t *tmpbuffer; // used as a go between for integer data!
 
     void *readbuffer;
 
-    int flags;
-    int samples_to_append;
+    uint16_t flags;
+    uint16_t samples_to_append;
 
-    int pre_filter;
-    int post_filter;
+    uint8_t pre_filter;
+    uint8_t post_filter;
 
-    int bh4_window;
-    int hann_window;
-    int verbosity;
-    int interpolate;
-    int pre_post_filter;
+    uint8_t bh4_window;
+    uint8_t hann_window;
+    uint8_t verbosity;
+    uint8_t interpolate;
+    uint8_t pre_post_filter;
 
-    int num_channels;
-    int outbits;
-    int inbits;
+    uint8_t num_channels;
+    uint8_t outbits;
+    uint8_t inbits;
 
     Biquad lowpass [ART_STREAM_NUM_CHANNELS][2];
     BiquadCoefficients lowpass_coeff;
@@ -57,11 +61,7 @@ typedef struct
     FILE* out_stream;
 }process_context_t;
 
-#define BUFFER_SAMPLES          441
-
-#define IS_BIG_ENDIAN (*(uint16_t *)"\0\xff" < 0x0100)
-
-unsigned int process_audio_init();
-unsigned int process_audio_deinit();
-unsigned int process_audio();
+uint16_t process_audio_init();
+uint16_t process_audio_deinit();
+uint16_t process_audio();
 
