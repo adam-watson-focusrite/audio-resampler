@@ -68,6 +68,30 @@ typedef struct
 
     FILE* in_stream;
     FILE* out_stream;
+
+    unsigned int outbuffer_samples;
+    unsigned long remaining_samples;
+    unsigned long output_samples;
+    unsigned long clipped_samples;
+    unsigned long num_samples;
+
+    float *outbuffer;
+    float *inbuffer;
+    unsigned char *tmpbuffer;
+
+    void *readbuffer;
+
+    int flags;
+    int samples_to_append;
+
+    int pre_filter;
+    int post_filter;
+
+    Biquad lowpass [2][2];
+    BiquadCoefficients lowpass_coeff;
+    Resample *resampler;
+
+    float error [2];
 }process_context_t;
 
 static process_context_t process_context;
@@ -79,7 +103,7 @@ int main (argc, argv) int argc; char **argv;
 	process_context.gain=1.0;
 
     char *infilename = NULL, *outfilename = NULL;
-    FILE *outfile;
+    //FILE *outfile;
 
     // loop through command-line arguments
 
@@ -267,32 +291,32 @@ static int wav_process (char *infilename, char *outfilename)
     int format = 0, res = 0, inbits = 0, num_channels = 0;
     unsigned long num_samples = 0;
     uint32_t channel_mask = 0;
-    FILE *infile, *outfile;
+    //FILE *infile, *outfile;
     RiffChunkHeader riff_chunk_header;
     ChunkHeader chunk_header;
     WaveHeader WaveHeader;
 
     // open both input and output files
 
-    if (!(infile = fopen (infilename, "rb"))) {
+    if (!(process_context.in_stream = fopen (infilename, "rb"))) {
         fprintf (stderr, "can't open file \"%s\" for reading!\n", infilename);
         return -1;
     }
 
-    if (!(outfile = fopen (outfilename, "wb"))) {
+    if (!(process_context.out_stream = fopen (outfilename, "wb"))) {
         fprintf (stderr, "can't open file \"%s\" for writing!\n", outfilename);
-        fclose (infile);
+        fclose (process_context.in_stream);
         return -1;
     }
 
     // read (and write) initial RIFF form header
 
-    if (!fread (&riff_chunk_header, sizeof (RiffChunkHeader), 1, infile) ||
+    if (!fread (&riff_chunk_header, sizeof (RiffChunkHeader), 1, process_context.in_stream) ||
         strncmp (riff_chunk_header.ckID, "RIFF", 4) ||
         strncmp (riff_chunk_header.formType, "WAVE", 4)) {
             fprintf (stderr, "\"%s\" is not a valid .WAV file!\n", infilename);
-            fclose (outfile);
-            fclose (infile);
+            fclose (process_context.out_stream);
+            fclose (process_context.in_stream);
             return -1;
     }
 
@@ -300,10 +324,10 @@ static int wav_process (char *infilename, char *outfilename)
 
     while (1) {
 
-        if (!fread (&chunk_header, sizeof (ChunkHeader), 1, infile)) {
+        if (!fread (&chunk_header, sizeof (ChunkHeader), 1, process_context.in_stream)) {
             fprintf (stderr, "\"%s\" is not a valid .WAV file!\n", infilename);
-            fclose (outfile);
-            fclose (infile);
+            fclose (process_context.out_stream);
+            fclose (process_context.in_stream);
             return -1;
         }
 
@@ -316,10 +340,10 @@ static int wav_process (char *infilename, char *outfilename)
             int supported = 1;
 
             if (chunk_header.ckSize < 16 || chunk_header.ckSize > sizeof (WaveHeader) ||
-                !fread (&WaveHeader, chunk_header.ckSize, 1, infile)) {
+                !fread (&WaveHeader, chunk_header.ckSize, 1, process_context.in_stream)) {
                     fprintf (stderr, "\"%s\" is not a valid .WAV file!\n", infilename);
-                    fclose (outfile);
-                    fclose (infile);
+                    fclose (process_context.out_stream);
+                    fclose (process_context.in_stream);
                     return -1;
             }
 
@@ -357,8 +381,8 @@ static int wav_process (char *infilename, char *outfilename)
 
             if (!supported) {
                 fprintf (stderr, "\"%s\" is an unsupported .WAV format!\n", infilename);
-                fclose (outfile);
-                fclose (infile);
+                fclose (process_context.out_stream);
+                fclose (process_context.in_stream);
                 return -1;
             }
 
@@ -384,22 +408,22 @@ static int wav_process (char *infilename, char *outfilename)
 
             if (!WaveHeader.NumChannels) {      // make sure we saw a "fmt" chunk...
                 fprintf (stderr, "\"%s\" is not a valid .WAV file!\n", infilename);
-                fclose (outfile);
-                fclose (infile);
+                fclose (process_context.out_stream);
+                fclose (process_context.in_stream);
                 return -1;
             }
 
             if (!chunk_header.ckSize) {
                 fprintf (stderr, "this .WAV file has no audio samples, probably is corrupt!\n");
-                fclose (outfile);
-                fclose (infile);
+                fclose (process_context.out_stream);
+                fclose (process_context.in_stream);
                 return -1;
             }
 
             if (chunk_header.ckSize % WaveHeader.BlockAlign) {
                 fprintf (stderr, "\"%s\" is not a valid .WAV file!\n", infilename);
-                fclose (outfile);
-                fclose (infile);
+                fclose (process_context.out_stream);
+                fclose (process_context.in_stream);
                 return -1;
             }
 
@@ -407,8 +431,8 @@ static int wav_process (char *infilename, char *outfilename)
 
             if (!num_samples) {
                 fprintf (stderr, "this .WAV file has no audio samples, probably is corrupt!\n");
-                fclose (outfile);
-                fclose (infile);
+                fclose (process_context.out_stream);
+                fclose (process_context.in_stream);
                 return -1;
             }
 
@@ -434,12 +458,12 @@ static int wav_process (char *infilename, char *outfilename)
                 if (bytes_to_read > sizeof (temp_buffer))
                     bytes_to_read = sizeof (temp_buffer);
 
-                bytes_read = fread (temp_buffer, 1, bytes_to_read, infile);
+                bytes_read = fread (temp_buffer, 1, bytes_to_read, process_context.in_stream);
 
                 if (bytes_read != bytes_to_read) {
                     fprintf (stderr, "\"%s\" is not a valid .WAV file!\n", infilename);
-                    fclose (outfile);
-                    fclose (infile);
+                    fclose (process_context.out_stream);
+                    fclose (process_context.in_stream);
                     return -1;
                 }
 
@@ -450,8 +474,8 @@ static int wav_process (char *infilename, char *outfilename)
 
     if (!num_channels || !process_context.sample_rate || !inbits || !num_samples) {
         fprintf (stderr, "\"%s\" is not a valid .WAV file!\n", infilename);
-        fclose (outfile);
-        fclose (infile);
+        fclose (process_context.out_stream);
+        fclose (process_context.in_stream);
         return -1;
     }
 
@@ -465,29 +489,26 @@ static int wav_process (char *infilename, char *outfilename)
             num_channels, infilename, inbits, (int)((process_context.sample_rate + 500) / 1000),
             outfilename, outbits, (int)((process_context.resample_rate + 500) / 1000));
 
-    if (!write_pcm_wav_header (outfile, outbits, num_channels, num_samples, process_context.resample_rate, channel_mask)) {
+    if (!write_pcm_wav_header (process_context.out_stream, outbits, num_channels, num_samples, process_context.resample_rate, channel_mask)) {
         fprintf (stderr, "can't write to file \"%s\"!\n", outfilename);
-        fclose (outfile);
-        fclose (infile);
+        fclose (process_context.out_stream);
+        fclose (process_context.in_stream);
         return -1;
     }
-
-    process_context.in_stream = infile;
-    process_context.out_stream = outfile;
 
     unsigned int output_samples = process_audio (process_context.sample_rate, num_samples);
 
-    rewind (outfile);
+    rewind (process_context.out_stream);
 
-    if (!write_pcm_wav_header (outfile, outbits, num_channels, output_samples, process_context.resample_rate, channel_mask)) {
+    if (!write_pcm_wav_header (process_context.out_stream, outbits, num_channels, output_samples, process_context.resample_rate, channel_mask)) {
         fprintf (stderr, "can't write to file \"%s\"!\n", outfilename);
-        fclose (outfile);
-        fclose (infile);
+        fclose (process_context.out_stream);
+        fclose (process_context.in_stream);
         return -1;
     }
 
-    fclose (outfile);
-    fclose (infile);
+    fclose (process_context.out_stream);
+    fclose (process_context.in_stream);
     return res;
 }
 
@@ -545,27 +566,34 @@ size_t fwrite_stream(void * buffer, size_t size, size_t count)
 	return fwrite(buffer,size,count,process_context.out_stream);
 }
 
+static unsigned int process_audio_init (unsigned long sample_rate,unsigned long num_samples)
+{
+	return 0;
+}
+
 static unsigned int process_audio (unsigned long sample_rate,unsigned long num_samples)
 {
+	process_context.num_samples = num_samples;
+	process_context.sample_rate = sample_rate;
+
 
 	process_context.sample_ratio = (double) process_context.resample_rate / (double)process_context.sample_rate;
 	process_context.lowpass_ratio = 1.0;
 
-    unsigned int outbuffer_samples = (int) floor (BUFFER_SAMPLES * process_context.sample_ratio * 1.1 + 100.0);
-    unsigned long remaining_samples = num_samples, output_samples = 0, clipped_samples = 0;
+	process_context.outbuffer_samples = (int) floor (BUFFER_SAMPLES * process_context.sample_ratio * 1.1 + 100.0);
+	process_context.remaining_samples = process_context.num_samples, process_context.output_samples = 0, process_context.clipped_samples = 0;
 
-    float *outbuffer = malloc (outbuffer_samples * num_channels * sizeof (float));
-    float *inbuffer = malloc (BUFFER_SAMPLES * num_channels * sizeof (float));
+	process_context.outbuffer = malloc (process_context.outbuffer_samples * num_channels * sizeof (float));
+	process_context.inbuffer = malloc (BUFFER_SAMPLES * num_channels * sizeof (float));
 
-    int flags = interpolate ? SUBSAMPLE_INTERPOLATE : 0;
-    int samples_to_append = process_context.num_taps / 2;
-    int pre_filter = 0, post_filter = 0;
-    Biquad lowpass [num_channels] [2];
-    BiquadCoefficients lowpass_coeff;
-    unsigned char *tmpbuffer = NULL;
-    void *readbuffer = inbuffer;
-    float error [num_channels];
-    Resample *resampler;
+	process_context.flags = interpolate ? SUBSAMPLE_INTERPOLATE : 0;
+    process_context.samples_to_append = process_context.num_taps / 2;
+
+    process_context.pre_filter = 0;
+    process_context.post_filter = 0;
+
+    process_context.readbuffer = process_context.inbuffer;
+
 
     // when downsampling, calculate the optimum lowpass based on resample filter
     // length (i.e., more taps allow us to lowpass closer to Nyquist)
@@ -597,86 +625,86 @@ static unsigned int process_audio (unsigned long sample_rate,unsigned long num_s
     }
 
     if (bh4_window || !hann_window)
-        flags |= BLACKMAN_HARRIS;
+    	process_context.flags |= BLACKMAN_HARRIS;
 
     if (process_context.lowpass_ratio * process_context.sample_ratio < 0.98 && pre_post_filter) {
         double cutoff = process_context.lowpass_ratio * process_context.sample_ratio / 2.0;
-        biquad_lowpass (&lowpass_coeff, cutoff);
-        pre_filter = 1;
+        biquad_lowpass (&process_context.lowpass_coeff, cutoff);
+        process_context.pre_filter = 1;
 
         if (verbosity > 0)
             fprintf (stderr, "cascaded biquad pre-filter at %g Hz\n", sample_rate * cutoff);
     }
 
     if (process_context.sample_ratio < 1.0) {
-        resampler = resampleInit (num_channels, process_context.num_taps, process_context.num_filters, process_context.sample_ratio * process_context.lowpass_ratio, flags | INCLUDE_LOWPASS);
+    	process_context.resampler = resampleInit (num_channels, process_context.num_taps, process_context.num_filters, process_context.sample_ratio * process_context.lowpass_ratio, process_context.flags | INCLUDE_LOWPASS);
 
         if (verbosity > 0)
             fprintf (stderr, "%d-tap sinc downsampler with lowpass at %g Hz\n", process_context.num_taps, process_context.sample_ratio * process_context.lowpass_ratio * process_context.sample_rate / 2.0);
     }
     else if (process_context.lowpass_ratio < 1.0) {
-        resampler = resampleInit (num_channels, process_context.num_taps, process_context.num_filters, process_context.lowpass_ratio, flags | INCLUDE_LOWPASS);
+    	process_context.resampler = resampleInit (num_channels, process_context.num_taps, process_context.num_filters, process_context.lowpass_ratio, process_context.flags | INCLUDE_LOWPASS);
 
         if (verbosity > 0)
             fprintf (stderr, "%d-tap sinc resampler with lowpass at %g Hz\n", process_context.num_taps, process_context.lowpass_ratio * sample_rate / 2.0);
     }
     else {
-        resampler = resampleInit (num_channels, process_context.num_taps, process_context.num_filters, 1.0, flags);
+    	process_context.resampler = resampleInit (num_channels, process_context.num_taps, process_context.num_filters, 1.0, process_context.flags);
 
         if (verbosity > 0)
             fprintf (stderr, "%d-tap pure sinc resampler (no lowpass), %g Hz Nyquist\n", process_context.num_taps, sample_rate / 2.0);
     }
 
-    if (process_context.lowpass_ratio / process_context.sample_ratio < 0.98 && pre_post_filter && !pre_filter) {
+    if (process_context.lowpass_ratio / process_context.sample_ratio < 0.98 && pre_post_filter && !process_context.pre_filter) {
         double cutoff = process_context.lowpass_ratio / process_context.sample_ratio / 2.0;
-        biquad_lowpass (&lowpass_coeff, cutoff);
-        post_filter = 1;
+        biquad_lowpass (&process_context.lowpass_coeff, cutoff);
+        process_context.post_filter = 1;
 
         if (verbosity > 0)
             fprintf (stderr, "cascaded biquad post-filter at %g Hz\n", process_context.resample_rate * cutoff);
     }
 
-    if (pre_filter || post_filter)
+    if (process_context.pre_filter || process_context.post_filter)
         for (int i = 0; i < num_channels; ++i) {
-            biquad_init (&lowpass [i] [0], &lowpass_coeff, 1.0);
-            biquad_init (&lowpass [i] [1], &lowpass_coeff, 1.0);
+            biquad_init (&process_context.lowpass [i] [0], &process_context.lowpass_coeff, 1.0);
+            biquad_init (&process_context.lowpass [i] [1], &process_context.lowpass_coeff, 1.0);
         }
 
     if (outbits != 32) {
-        memset (error, 0, sizeof (error));
+        memset (process_context.error, 0, sizeof (process_context.error));
         tpdf_dither_init (num_channels);
     }
 
     if (inbits != 32 || outbits != 32) {
         int max_samples = BUFFER_SAMPLES, max_bytes = 2;
 
-        if (outbuffer_samples > BUFFER_SAMPLES)
-            max_samples = outbuffer_samples;
+        if (process_context.outbuffer_samples > BUFFER_SAMPLES)
+            max_samples = process_context.outbuffer_samples;
 
         if (inbits > 16 || outbits > 16)
             max_bytes = 3;
 
-        tmpbuffer = malloc (max_samples * num_channels * max_bytes);
+        process_context.tmpbuffer = malloc (max_samples * num_channels * max_bytes);
 
         if (inbits != 32)
-            readbuffer = tmpbuffer;
+        	process_context.readbuffer = process_context.tmpbuffer;
     }
 
     // this takes care of the filter delay and any user-specified phase shift
-    resampleAdvancePosition (resampler, process_context.num_taps / 2.0 + process_context.phase_shift);
+    resampleAdvancePosition (process_context.resampler, process_context.num_taps / 2.0 + process_context.phase_shift);
 
     uint32_t progress_divider = 0, percent;
 
-    if (verbosity >= 0 && remaining_samples > 1000) {
-        progress_divider = (remaining_samples + 50) / 100;
+    if (verbosity >= 0 && process_context.remaining_samples > 1000) {
+        progress_divider = (process_context.remaining_samples + 50) / 100;
         fprintf (stderr, "\rprogress: %d%% ", percent = 0); fflush (stderr);
     }
 
-    while (remaining_samples + samples_to_append) {
+    while (process_context.remaining_samples + process_context.samples_to_append) {
 
         // first we read the audio data, converting to 32-bit float (if not already) and applying gain
 
-        unsigned long samples_to_read = remaining_samples, stream_samples_read, samples_generated;
+        unsigned long samples_to_read = process_context.remaining_samples, stream_samples_read, samples_generated;
         ResampleResult res;
 
         if (samples_to_read > BUFFER_SAMPLES)
@@ -684,12 +712,12 @@ static unsigned int process_audio (unsigned long sample_rate,unsigned long num_s
 
         int stream_read_size = num_channels * ((inbits + 7) / 8);
 
-        stream_samples_read = fread_stream(readbuffer, stream_read_size, samples_to_read);
+        stream_samples_read = fread_stream(process_context.readbuffer, stream_read_size, samples_to_read);
 
-        remaining_samples -= stream_samples_read;
+        process_context.remaining_samples -= stream_samples_read;
 
         if (!stream_samples_read) {
-            int samples_to_append_now = samples_to_append;
+            int samples_to_append_now = process_context.samples_to_append;
 
             if (!samples_to_append_now)
                 break;
@@ -697,9 +725,9 @@ static unsigned int process_audio (unsigned long sample_rate,unsigned long num_s
             if (samples_to_append_now > BUFFER_SAMPLES)
                 samples_to_append_now = BUFFER_SAMPLES;
 
-            memset (readbuffer, (inbits <= 8) * 128, samples_to_append_now * num_channels * ((inbits + 7) / 8));
+            memset (process_context.readbuffer, (inbits <= 8) * 128, samples_to_append_now * num_channels * ((inbits + 7) / 8));
             stream_samples_read = samples_to_append_now;
-            samples_to_append -= samples_to_append_now;
+            process_context.samples_to_append -= samples_to_append_now;
         }
 
         if (inbits <= 8) {
@@ -707,16 +735,16 @@ static unsigned int process_audio (unsigned long sample_rate,unsigned long num_s
             int i;
 
             for (i = 0; i < stream_samples_read * num_channels; ++i)
-                inbuffer [i] = ((int) tmpbuffer [i] - 128) * gain_factor;
+            	process_context.inbuffer [i] = ((int) process_context.tmpbuffer [i] - 128) * gain_factor;
         }
         else if (inbits <= 16) {
             float gain_factor = process_context.gain / 32768.0;
             int i, j;
 
             for (i = j = 0; i < stream_samples_read * num_channels; ++i) {
-                int16_t value = tmpbuffer [j++];
-                value += tmpbuffer [j++] << 8;
-                inbuffer [i] = value * gain_factor;
+                int16_t value = process_context.tmpbuffer [j++];
+                value += process_context.tmpbuffer [j++] << 8;
+                process_context.inbuffer [i] = value * gain_factor;
             }
         }
         else if (inbits <= 24) {
@@ -724,15 +752,15 @@ static unsigned int process_audio (unsigned long sample_rate,unsigned long num_s
             int i, j;
 
             for (i = j = 0; i < stream_samples_read * num_channels; ++i) {
-                int32_t value = tmpbuffer [j++];
-                value += tmpbuffer [j++] << 8;
-                value += (int32_t) (signed char) tmpbuffer [j++] << 16;
-                inbuffer [i] = value * gain_factor;
+                int32_t value = process_context.tmpbuffer [j++];
+                value += process_context.tmpbuffer [j++] << 8;
+                value += (int32_t) (signed char) process_context.tmpbuffer [j++] << 16;
+                process_context.inbuffer [i] = value * gain_factor;
             }
         }
         else {
             if (IS_BIG_ENDIAN) {
-                unsigned char *bptr = (unsigned char *) inbuffer, word [4];
+                unsigned char *bptr = (unsigned char *) process_context.inbuffer, word [4];
                 int wcount = stream_samples_read * num_channels;
 
                 while (wcount--) {
@@ -746,24 +774,24 @@ static unsigned int process_audio (unsigned long sample_rate,unsigned long num_s
 
             if (process_context.gain != 1.0)
                 for (int i = 0; i < stream_samples_read * num_channels; ++i)
-                    inbuffer [i] *= process_context.gain;
+                	process_context.inbuffer [i] *= process_context.gain;
         }
 
         // common code to process the audio in 32-bit floats
 
-        if (pre_filter)
+        if (process_context.pre_filter)
             for (int i = 0; i < num_channels; ++i) {
-                biquad_apply_buffer (&lowpass [i] [0], inbuffer + i, stream_samples_read, num_channels);
-                biquad_apply_buffer (&lowpass [i] [1], inbuffer + i, stream_samples_read, num_channels);
+                biquad_apply_buffer (&process_context.lowpass [i] [0], process_context.inbuffer + i, stream_samples_read, num_channels);
+                biquad_apply_buffer (&process_context.lowpass [i] [1], process_context.inbuffer + i, stream_samples_read, num_channels);
             }
 
-        res = resampleProcessInterleaved (resampler, inbuffer, stream_samples_read, outbuffer, outbuffer_samples, process_context.sample_ratio);
+        res = resampleProcessInterleaved (process_context.resampler, process_context.inbuffer, stream_samples_read, process_context.outbuffer, process_context.outbuffer_samples, process_context.sample_ratio);
         samples_generated = res.output_generated;
 
-        if (post_filter)
+        if (process_context.post_filter)
             for (int i = 0; i < num_channels; ++i) {
-                biquad_apply_buffer (&lowpass [i] [0], outbuffer + i, samples_generated, num_channels);
-                biquad_apply_buffer (&lowpass [i] [1], outbuffer + i, samples_generated, num_channels);
+                biquad_apply_buffer (&process_context.lowpass [i] [0], process_context.outbuffer + i, samples_generated, num_channels);
+                biquad_apply_buffer (&process_context.lowpass [i] [1], process_context.outbuffer + i, samples_generated, num_channels);
             }
 
         // finally write the audio, converting to appropriate integer format if requested
@@ -778,53 +806,37 @@ static unsigned int process_audio (unsigned long sample_rate,unsigned long num_s
 
             for (i = j = 0; i < samples_generated * num_channels; ++i) {
                 int chan = i % num_channels;
-                int32_t output = floor ((outbuffer [i] *= scaler) - error [chan] + tpdf_dither (chan, -1) + 0.5);
+                int32_t output = floor ((process_context.outbuffer [i] *= scaler) - process_context.error [chan] + tpdf_dither (chan, -1) + 0.5);
 
                 if (output > highclip) {
-                    clipped_samples++;
+                	process_context.clipped_samples++;
                     output = highclip;
                 }
                 else if (output < lowclip) {
-                    clipped_samples++;
+                	process_context.clipped_samples++;
                     output = lowclip;
                 }
 
-                error [chan] += output - outbuffer [i];
-                tmpbuffer [j++] = output = (output << leftshift) + offset;
+                process_context.error [chan] += output - process_context.outbuffer [i];
+                process_context.tmpbuffer [j++] = output = (output << leftshift) + offset;
 
                 if (outbits > 8) {
-                    tmpbuffer [j++] = output >> 8;
+                	process_context.tmpbuffer [j++] = output >> 8;
 
                     if (outbits > 16)
-                        tmpbuffer [j++] = output >> 16;
+                    	process_context.tmpbuffer [j++] = output >> 16;
                 }
             }
 
             int stream_write_size = num_channels * ((outbits + 7) / 8);
 
-            fwrite_stream (tmpbuffer, stream_write_size, samples_generated);
+            fwrite_stream (process_context.tmpbuffer, stream_write_size, samples_generated);
         }
-/*        else {
-            if (IS_BIG_ENDIAN) {
-                unsigned char *bptr = (unsigned char *) outbuffer, word [4];
-                int wcount = samples_generated * num_channels;
 
-                while (wcount--) {
-                    memcpy (word, bptr, 4);
-                    *bptr++ = word [3];
-                    *bptr++ = word [2];
-                    *bptr++ = word [1];
-                    *bptr++ = word [0];
-                }
-            }
-
-            fwrite (outbuffer, num_channels * sizeof (float), samples_generated, outfile);
-        }*/
-
-        output_samples += samples_generated;
+        process_context.output_samples += samples_generated;
 
         if (progress_divider) {
-            int new_percent = 100 - remaining_samples / progress_divider;
+            int new_percent = 100 - process_context.remaining_samples / progress_divider;
 
             if (new_percent != percent) {
                 fprintf (stderr, "\rprogress: %d%% ", percent = new_percent);
@@ -836,19 +848,19 @@ static unsigned int process_audio (unsigned long sample_rate,unsigned long num_s
     if (verbosity >= 0)
         fprintf (stderr, "\r...completed successfully\n");
 
-    resampleFree (resampler);
+    resampleFree (process_context.resampler);
     tpdf_dither_free ();
-    free (inbuffer);
-    free (outbuffer);
-    free (tmpbuffer);
+    free (process_context.inbuffer);
+    free (process_context.outbuffer);
+    free (process_context.tmpbuffer);
 
-    if (clipped_samples)
-        fprintf (stderr, "warning: %lu samples were clipped, suggest reducing gain!\n", clipped_samples);
+    if (process_context.clipped_samples)
+        fprintf (stderr, "warning: %lu samples were clipped, suggest reducing gain!\n", process_context.clipped_samples);
 
-    if (remaining_samples)
+    if (process_context.remaining_samples)
         fprintf (stderr, "warning: file terminated early!\n");
 
-    return output_samples;
+    return process_context.output_samples;
 }
 
 static int write_pcm_wav_header (FILE *outfile, int bps, int num_channels, unsigned long num_samples, unsigned long sample_rate, uint32_t channel_mask)
