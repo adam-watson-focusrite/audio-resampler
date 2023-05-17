@@ -45,16 +45,6 @@ static const char *usage =
 
 static int wav_process (char *infilename, char *outfilename);
 
-static int bh4_window;
-static int hann_window;
-static int verbosity;
-static int interpolate = 1;
-static int pre_post_filter;
-
-extern const int num_channels;
-extern const int outbits;
-extern const int inbits;
-
 process_context_t process_context={};
 
 int main (argc, argv) int argc; char **argv;
@@ -89,15 +79,15 @@ int main (argc, argv) int argc; char **argv;
 			break;
 
                     case 'P': case 'p':
-                        pre_post_filter = 1;
+                    	process_context.pre_post_filter = 1;
                         break;
 
                     case 'Q': case 'q':
-                        verbosity = -1;
+                    	process_context.verbosity = -1;
                         break;
 
                     case 'V': case 'v':
-                        verbosity = 1;
+                    	process_context.verbosity = 1;
                         break;
 
 		    case 'R': case 'r':
@@ -152,15 +142,15 @@ int main (argc, argv) int argc; char **argv;
 			break;
 
 		    case 'N': case 'n':
-			interpolate = 0;
+		    	process_context.interpolate = 0;
 			break;
 
 		    case 'B': case 'b':
-			bh4_window = 1;
+		    	process_context.bh4_window = 1;
 			break;
 
 		    case 'H': case 'h':
-			hann_window = 1;
+		    	process_context.hann_window = 1;
 			break;
 
                     default:
@@ -181,7 +171,7 @@ int main (argc, argv) int argc; char **argv;
         }
     }
 
-    if (verbosity >= 0)
+    if (process_context.verbosity >= 0)
         fprintf (stderr, "%s", sign_on);
 
     if (!outfilename) {
@@ -308,22 +298,22 @@ static int wav_process (char *infilename, char *outfilename)
             channel_mask = (WaveHeader.FormatTag == WAVE_FORMAT_EXTENSIBLE && chunk_header.ckSize == 40) ?
                 WaveHeader.ChannelMask : 0;
 
-            int inbits = (chunk_header.ckSize == 40 && WaveHeader.Samples.ValidBitsPerSample) ?
+            process_context.inbits = (chunk_header.ckSize == 40 && WaveHeader.Samples.ValidBitsPerSample) ?
                 WaveHeader.Samples.ValidBitsPerSample : WaveHeader.BitsPerSample;
 
             if (WaveHeader.NumChannels < 1 || WaveHeader.NumChannels > 32)
                 supported = 0;
             else if (format == WAVE_FORMAT_PCM) {
 
-                if (inbits < 4 || inbits > 24)
+                if (process_context.inbits < 4 || process_context.inbits > 24)
                     supported = 0;
 
-                if (WaveHeader.BlockAlign != WaveHeader.NumChannels * ((inbits + 7) / 8))
+                if (WaveHeader.BlockAlign != WaveHeader.NumChannels * ((process_context.inbits + 7) / 8))
                     supported = 0;
             }
             else if (format == WAVE_FORMAT_IEEE_FLOAT) {
 
-                if (inbits != 32)
+                if (process_context.inbits != 32)
                     supported = 0;
 
                 if (WaveHeader.BlockAlign != WaveHeader.NumChannels * 4)
@@ -339,7 +329,7 @@ static int wav_process (char *infilename, char *outfilename)
                 return -1;
             }
 
-            if (verbosity > 0) {
+            if (process_context.verbosity > 0) {
                 fprintf (stderr, "format tag size = %d\n", chunk_header.ckSize);
                 fprintf (stderr, "FormatTag = 0x%x, NumChannels = %u, BitsPerSample = %u\n",
                     WaveHeader.FormatTag, WaveHeader.NumChannels, WaveHeader.BitsPerSample);
@@ -389,17 +379,17 @@ static int wav_process (char *infilename, char *outfilename)
                 return -1;
             }
 
-            if (verbosity > 0)
+            if (process_context.verbosity > 0)
                 fprintf (stderr, "num samples = %lu\n", process_context.num_samples);
 
-            int num_channels = WaveHeader.NumChannels;
+            process_context.num_channels = WaveHeader.NumChannels;
             process_context.sample_rate = WaveHeader.SampleRate;
             break;
         }
         else {          // just ignore/copy unknown chunks
             unsigned int bytes_to_copy = (chunk_header.ckSize + 1) & ~1L;
 
-            if (verbosity > 0)
+            if (process_context.verbosity > 0)
                 fprintf (stderr, "extra unknown chunk \"%c%c%c%c\" of %u bytes\n",
                     chunk_header.ckID [0], chunk_header.ckID [1], chunk_header.ckID [2],
                     chunk_header.ckID [3], bytes_to_copy);
@@ -425,7 +415,7 @@ static int wav_process (char *infilename, char *outfilename)
         }
     }
 
-    if (!num_channels || !process_context.sample_rate || !inbits || !process_context.num_samples) {
+    if (!process_context.num_channels || !process_context.sample_rate || !process_context.inbits || !process_context.num_samples) {
         fprintf (stderr, "\"%s\" is not a valid .WAV file!\n", infilename);
         fclose (process_context.out_stream);
         fclose (process_context.in_stream);
@@ -437,12 +427,12 @@ static int wav_process (char *infilename, char *outfilename)
     if (!process_context.resample_rate)
     	process_context.resample_rate = process_context.sample_rate;
 
-    if (verbosity >= 0)
+    if (process_context.verbosity >= 0)
         fprintf (stderr, "resampling %d-channel file \"%s\" (%db/%dk) to \"%s\" (%db/%dk)...\n",
-            num_channels, infilename, inbits, (int)((process_context.sample_rate + 500) / 1000),
-            outfilename, outbits, (int)((process_context.resample_rate + 500) / 1000));
+        		process_context.num_channels, infilename, process_context.inbits, (int)((process_context.sample_rate + 500) / 1000),
+            outfilename, process_context.outbits, (int)((process_context.resample_rate + 500) / 1000));
 
-    if (!write_pcm_wav_header (process_context.out_stream, outbits, num_channels, process_context.num_samples, process_context.resample_rate, channel_mask)) {
+    if (!write_pcm_wav_header (process_context.out_stream, process_context.outbits, process_context.num_channels, process_context.num_samples, process_context.resample_rate, channel_mask)) {
         fprintf (stderr, "can't write to file \"%s\"!\n", outfilename);
         fclose (process_context.out_stream);
         fclose (process_context.in_stream);
@@ -453,7 +443,7 @@ static int wav_process (char *infilename, char *outfilename)
 
     rewind (process_context.out_stream);
 
-    if (!write_pcm_wav_header (process_context.out_stream, outbits, num_channels, output_samples, process_context.resample_rate, channel_mask)) {
+    if (!write_pcm_wav_header (process_context.out_stream, process_context.outbits, process_context.num_channels, output_samples, process_context.resample_rate, channel_mask)) {
         fprintf (stderr, "can't write to file \"%s\"!\n", outfilename);
         fclose (process_context.out_stream);
         fclose (process_context.in_stream);

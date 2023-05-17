@@ -5,6 +5,7 @@
 #include <ctype.h>
 #include <math.h>
 
+#define ART_STREAM_NUM_CHANNELS 2
 typedef struct
 {
 	uint32_t resample_rate;
@@ -36,17 +37,27 @@ typedef struct
     int pre_filter;
     int post_filter;
 
-    Biquad lowpass [2][2];
+    int bh4_window;
+    int hann_window;
+    int verbosity;
+    int interpolate;
+    int pre_post_filter;
+
+    int num_channels;
+    int outbits;
+    int inbits;
+
+    Biquad lowpass [ART_STREAM_NUM_CHANNELS][2];
     BiquadCoefficients lowpass_coeff;
     Resample *resampler;
 
-    float error [2];
+    float error [ART_STREAM_NUM_CHANNELS];
 
     FILE* in_stream;
     FILE* out_stream;
 }process_context_t;
 
-#define BUFFER_SAMPLES          256
+#define BUFFER_SAMPLES          441
 
 #define IS_BIG_ENDIAN (*(uint16_t *)"\0\xff" < 0x0100)
 
