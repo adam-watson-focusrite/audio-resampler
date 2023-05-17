@@ -439,7 +439,7 @@ static int wav_process (char *infilename, char *outfilename)
         return -1;
     }
 
-    unsigned int output_samples = process_audio(process_context.num_samples);
+    unsigned int output_samples = art_resample_process_audio(process_context.num_samples);
 
     rewind (process_context.out_stream);
 

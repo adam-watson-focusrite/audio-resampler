@@ -72,7 +72,7 @@ static size_t fwrite_stream(void * buffer, size_t size, size_t count)
 	return fwrite(buffer,size,count,process_context.out_stream);
 }
 
-uint16_t process_audio_init()
+uint16_t art_resample_init()
 {
 	process_context.interpolate = 1;
 
@@ -208,7 +208,7 @@ uint16_t process_audio_init()
     return 0;
 }
 
-uint16_t process_audio_deinit()
+uint16_t art_resample_deinit()
 {
     resampleFree (process_context.resampler);
     tpdf_dither_free ();
@@ -227,7 +227,7 @@ uint16_t process_audio_deinit()
     return process_context.output_samples;
 }
 
-uint16_t process_audio_block (uint32_t stream_samples_read)
+uint16_t art_resample_process_block (uint32_t stream_samples_read)
 {
     ResampleResult res;
 	if (process_context.inbits <= 8) {
@@ -343,9 +343,9 @@ uint16_t process_audio_block (uint32_t stream_samples_read)
 	return samples_generated;
 }
 
-uint16_t process_audio()
+uint16_t art_resample_process_audio()
 {
-	process_audio_init();
+	art_resample_init();
 
     uint32_t progress_divider = 0, percent;
 
@@ -386,7 +386,7 @@ uint16_t process_audio()
             process_context.samples_to_append -= samples_to_append_now;
         }
 
-        uint32_t samples_generated = process_audio_block (stream_samples_read);
+        uint32_t samples_generated = art_resample_process_block (stream_samples_read);
 
         if(samples_generated)
         {
@@ -405,7 +405,7 @@ uint16_t process_audio()
 
 	}
 
-	process_audio_deinit();
+	art_resample_deinit();
 
 	return 0;
 }

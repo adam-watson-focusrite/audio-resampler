@@ -68,7 +68,7 @@ typedef struct
     FILE* out_stream;
 }process_context_t;
 
-uint16_t process_audio_init();
-uint16_t process_audio_deinit();
-uint16_t process_audio();
+uint16_t art_resample_init();
+uint16_t art_resample_deinit();
+uint16_t art_resample_process_audio();
 
