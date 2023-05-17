@@ -320,9 +320,6 @@ unsigned int process_audio_block (uint32_t stream_samples_read)
 			}
 		}
 
-		int stream_write_size = num_channels * ((outbits + 7) / 8);
-
-		fwrite_stream (process_context.tmpbuffer, stream_write_size, samples_generated);
 	}
 
 	process_context.output_samples += samples_generated;
@@ -330,7 +327,7 @@ unsigned int process_audio_block (uint32_t stream_samples_read)
 	return samples_generated;
 }
 
-unsigned int process_audio(unsigned long num_samples)
+unsigned int process_audio()
 {
 	process_audio_init();
 
@@ -355,12 +352,15 @@ unsigned int process_audio(unsigned long num_samples)
 
         process_context.remaining_samples -= stream_samples_read;
 
-        if (!stream_samples_read)
+        if (stream_samples_read==0)
         {
+        	// END OF THE STREAM!!!!
             int samples_to_append_now = process_context.samples_to_append;
 
             if (!samples_to_append_now)
+            {
                 break;
+            }
 
             if (samples_to_append_now > BUFFER_SAMPLES)
                 samples_to_append_now = BUFFER_SAMPLES;
@@ -370,7 +370,13 @@ unsigned int process_audio(unsigned long num_samples)
             process_context.samples_to_append -= samples_to_append_now;
         }
 
-        process_audio_block (stream_samples_read);
+        uint32_t samples_generated = process_audio_block (stream_samples_read);
+
+        if(samples_generated)
+        {
+    		int stream_write_size = num_channels * ((outbits + 7) / 8);
+    		fwrite_stream (process_context.tmpbuffer, stream_write_size, samples_generated);
+        }
 
         if (progress_divider) {
             int new_percent = 100 - process_context.remaining_samples / progress_divider;

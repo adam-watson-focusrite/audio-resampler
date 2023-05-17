@@ -50,6 +50,7 @@ typedef struct
 
 #define IS_BIG_ENDIAN (*(uint16_t *)"\0\xff" < 0x0100)
 
-unsigned int process_audio_init ();
-unsigned int process_audio(unsigned long num_samples);
+unsigned int process_audio_init();
+unsigned int process_audio_deinit();
+unsigned int process_audio();
 
