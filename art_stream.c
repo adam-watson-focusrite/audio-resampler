@@ -87,15 +87,6 @@ unsigned int process_audio_init()
 	process_context.num_filters=16;
 	process_context.gain=1.0;
 
-	return 0;
-}
-
-unsigned int process_audio (unsigned long sample_rate,unsigned long num_samples)
-{
-	process_context.num_samples = num_samples;
-	process_context.sample_rate = sample_rate;
-
-
 	process_context.sample_ratio = (double) process_context.resample_rate / (double)process_context.sample_rate;
 	process_context.lowpass_ratio = 1.0;
 
@@ -112,10 +103,6 @@ unsigned int process_audio (unsigned long sample_rate,unsigned long num_samples)
     process_context.post_filter = 0;
 
     process_context.readbuffer = process_context.inbuffer;
-
-
-    // when downsampling, calculate the optimum lowpass based on resample filter
-    // length (i.e., more taps allow us to lowpass closer to Nyquist)
 
     if (process_context.sample_ratio < 1.0) {
     	process_context.lowpass_ratio -= (10.24 / process_context.num_taps);
@@ -135,7 +122,7 @@ unsigned int process_audio (unsigned long sample_rate,unsigned long num_samples)
         if (process_context.sample_ratio < 1.0)
             user_lowpass_ratio = process_context.lowpass_freq / (process_context.resample_rate / 2.0);
         else
-            user_lowpass_ratio = process_context.lowpass_freq / (sample_rate / 2.0);
+            user_lowpass_ratio = process_context.lowpass_freq / (process_context.sample_rate / 2.0);
 
         if (user_lowpass_ratio >= 1.0)
             fprintf (stderr, "warning: ignoring invalid lowpass frequency specification (at or over Nyquist)\n");
@@ -152,7 +139,7 @@ unsigned int process_audio (unsigned long sample_rate,unsigned long num_samples)
         process_context.pre_filter = 1;
 
         if (verbosity > 0)
-            fprintf (stderr, "cascaded biquad pre-filter at %g Hz\n", sample_rate * cutoff);
+            fprintf (stderr, "cascaded biquad pre-filter at %g Hz\n", process_context.sample_rate * cutoff);
     }
 
     if (process_context.sample_ratio < 1.0) {
@@ -165,13 +152,13 @@ unsigned int process_audio (unsigned long sample_rate,unsigned long num_samples)
     	process_context.resampler = resampleInit (num_channels, process_context.num_taps, process_context.num_filters, process_context.lowpass_ratio, process_context.flags | INCLUDE_LOWPASS);
 
         if (verbosity > 0)
-            fprintf (stderr, "%d-tap sinc resampler with lowpass at %g Hz\n", process_context.num_taps, process_context.lowpass_ratio * sample_rate / 2.0);
+            fprintf (stderr, "%d-tap sinc resampler with lowpass at %g Hz\n", process_context.num_taps, process_context.lowpass_ratio * process_context.sample_rate / 2.0);
     }
     else {
     	process_context.resampler = resampleInit (num_channels, process_context.num_taps, process_context.num_filters, 1.0, process_context.flags);
 
         if (verbosity > 0)
-            fprintf (stderr, "%d-tap pure sinc resampler (no lowpass), %g Hz Nyquist\n", process_context.num_taps, sample_rate / 2.0);
+            fprintf (stderr, "%d-tap pure sinc resampler (no lowpass), %g Hz Nyquist\n", process_context.num_taps, process_context.sample_rate / 2.0);
     }
 
     if (process_context.lowpass_ratio / process_context.sample_ratio < 0.98 && pre_post_filter && !process_context.pre_filter) {
@@ -211,6 +198,15 @@ unsigned int process_audio (unsigned long sample_rate,unsigned long num_samples)
 
     // this takes care of the filter delay and any user-specified phase shift
     resampleAdvancePosition (process_context.resampler, process_context.num_taps / 2.0 + process_context.phase_shift);
+
+    return 0;
+}
+
+unsigned int process_audio (unsigned long num_samples)
+{
+    // when downsampling, calculate the optimum lowpass based on resample filter
+    // length (i.e., more taps allow us to lowpass closer to Nyquist)
+
 
     uint32_t progress_divider = 0, percent;
 

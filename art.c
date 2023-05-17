@@ -242,8 +242,7 @@ static void native_to_little_endian (void *data, char *format);
 
 static int wav_process (char *infilename, char *outfilename)
 {
-    int format = 0, res = 0, inbits = 0, num_channels = 0;
-    unsigned long num_samples = 0;
+    int format = 0, res = 0;
     uint32_t channel_mask = 0;
 
     RiffChunkHeader riff_chunk_header;
@@ -309,7 +308,7 @@ static int wav_process (char *infilename, char *outfilename)
             channel_mask = (WaveHeader.FormatTag == WAVE_FORMAT_EXTENSIBLE && chunk_header.ckSize == 40) ?
                 WaveHeader.ChannelMask : 0;
 
-            inbits = (chunk_header.ckSize == 40 && WaveHeader.Samples.ValidBitsPerSample) ?
+            int inbits = (chunk_header.ckSize == 40 && WaveHeader.Samples.ValidBitsPerSample) ?
                 WaveHeader.Samples.ValidBitsPerSample : WaveHeader.BitsPerSample;
 
             if (WaveHeader.NumChannels < 1 || WaveHeader.NumChannels > 32)
@@ -381,9 +380,9 @@ static int wav_process (char *infilename, char *outfilename)
                 return -1;
             }
 
-            num_samples = chunk_header.ckSize / WaveHeader.BlockAlign;
+            process_context.num_samples = chunk_header.ckSize / WaveHeader.BlockAlign;
 
-            if (!num_samples) {
+            if (!process_context.num_samples) {
                 fprintf (stderr, "this .WAV file has no audio samples, probably is corrupt!\n");
                 fclose (process_context.out_stream);
                 fclose (process_context.in_stream);
@@ -391,9 +390,9 @@ static int wav_process (char *infilename, char *outfilename)
             }
 
             if (verbosity > 0)
-                fprintf (stderr, "num samples = %lu\n", num_samples);
+                fprintf (stderr, "num samples = %lu\n", process_context.num_samples);
 
-            num_channels = WaveHeader.NumChannels;
+            int num_channels = WaveHeader.NumChannels;
             process_context.sample_rate = WaveHeader.SampleRate;
             break;
         }
@@ -426,7 +425,7 @@ static int wav_process (char *infilename, char *outfilename)
         }
     }
 
-    if (!num_channels || !process_context.sample_rate || !inbits || !num_samples) {
+    if (!num_channels || !process_context.sample_rate || !inbits || !process_context.num_samples) {
         fprintf (stderr, "\"%s\" is not a valid .WAV file!\n", infilename);
         fclose (process_context.out_stream);
         fclose (process_context.in_stream);
@@ -443,7 +442,7 @@ static int wav_process (char *infilename, char *outfilename)
             num_channels, infilename, inbits, (int)((process_context.sample_rate + 500) / 1000),
             outfilename, outbits, (int)((process_context.resample_rate + 500) / 1000));
 
-    if (!write_pcm_wav_header (process_context.out_stream, outbits, num_channels, num_samples, process_context.resample_rate, channel_mask)) {
+    if (!write_pcm_wav_header (process_context.out_stream, outbits, num_channels, process_context.num_samples, process_context.resample_rate, channel_mask)) {
         fprintf (stderr, "can't write to file \"%s\"!\n", outfilename);
         fclose (process_context.out_stream);
         fclose (process_context.in_stream);
@@ -451,7 +450,7 @@ static int wav_process (char *infilename, char *outfilename)
     }
 
     process_audio_init();
-    unsigned int output_samples = process_audio(process_context.sample_rate, num_samples);
+    unsigned int output_samples = process_audio(process_context.num_samples);
 
     rewind (process_context.out_stream);
 
