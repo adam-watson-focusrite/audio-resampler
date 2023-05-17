@@ -46,7 +46,7 @@ typedef struct
     FILE* out_stream;
 }process_context_t;
 
-#define BUFFER_SAMPLES          4096
+#define BUFFER_SAMPLES          256
 
 #define IS_BIG_ENDIAN (*(uint16_t *)"\0\xff" < 0x0100)
 

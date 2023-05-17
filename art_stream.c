@@ -202,167 +202,8 @@ unsigned int process_audio_init()
     return 0;
 }
 
-unsigned int process_audio (unsigned long num_samples)
+unsigned int process_audio_deinit()
 {
-    // when downsampling, calculate the optimum lowpass based on resample filter
-    // length (i.e., more taps allow us to lowpass closer to Nyquist)
-
-
-    uint32_t progress_divider = 0, percent;
-
-    if (verbosity >= 0 && process_context.remaining_samples > 1000) {
-        progress_divider = (process_context.remaining_samples + 50) / 100;
-        fprintf (stderr, "\rprogress: %d%% ", percent = 0); fflush (stderr);
-    }
-
-    while (process_context.remaining_samples + process_context.samples_to_append) {
-
-        // first we read the audio data, converting to 32-bit float (if not already) and applying gain
-
-        unsigned long samples_to_read = process_context.remaining_samples, stream_samples_read, samples_generated;
-        ResampleResult res;
-
-        if (samples_to_read > BUFFER_SAMPLES)
-            samples_to_read = BUFFER_SAMPLES;
-
-        int stream_read_size = num_channels * ((inbits + 7) / 8);
-
-        stream_samples_read = fread_stream(process_context.readbuffer, stream_read_size, samples_to_read);
-
-        process_context.remaining_samples -= stream_samples_read;
-
-        if (!stream_samples_read) {
-            int samples_to_append_now = process_context.samples_to_append;
-
-            if (!samples_to_append_now)
-                break;
-
-            if (samples_to_append_now > BUFFER_SAMPLES)
-                samples_to_append_now = BUFFER_SAMPLES;
-
-            memset (process_context.readbuffer, (inbits <= 8) * 128, samples_to_append_now * num_channels * ((inbits + 7) / 8));
-            stream_samples_read = samples_to_append_now;
-            process_context.samples_to_append -= samples_to_append_now;
-        }
-
-        if (inbits <= 8) {
-            float gain_factor = process_context.gain / 128.0;
-            int i;
-
-            for (i = 0; i < stream_samples_read * num_channels; ++i)
-            	process_context.inbuffer [i] = ((int) process_context.tmpbuffer [i] - 128) * gain_factor;
-        }
-        else if (inbits <= 16) {
-            float gain_factor = process_context.gain / 32768.0;
-            int i, j;
-
-            for (i = j = 0; i < stream_samples_read * num_channels; ++i) {
-                int16_t value = process_context.tmpbuffer [j++];
-                value += process_context.tmpbuffer [j++] << 8;
-                process_context.inbuffer [i] = value * gain_factor;
-            }
-        }
-        else if (inbits <= 24) {
-            float gain_factor = process_context.gain / 8388608.0;
-            int i, j;
-
-            for (i = j = 0; i < stream_samples_read * num_channels; ++i) {
-                int32_t value = process_context.tmpbuffer [j++];
-                value += process_context.tmpbuffer [j++] << 8;
-                value += (int32_t) (signed char) process_context.tmpbuffer [j++] << 16;
-                process_context.inbuffer [i] = value * gain_factor;
-            }
-        }
-        else {
-            if (IS_BIG_ENDIAN) {
-                unsigned char *bptr = (unsigned char *) process_context.inbuffer, word [4];
-                int wcount = stream_samples_read * num_channels;
-
-                while (wcount--) {
-                    memcpy (word, bptr, 4);
-                    *bptr++ = word [3];
-                    *bptr++ = word [2];
-                    *bptr++ = word [1];
-                    *bptr++ = word [0];
-                }
-            }
-
-            if (process_context.gain != 1.0)
-                for (int i = 0; i < stream_samples_read * num_channels; ++i)
-                	process_context.inbuffer [i] *= process_context.gain;
-        }
-
-        // common code to process the audio in 32-bit floats
-
-        if (process_context.pre_filter)
-            for (int i = 0; i < num_channels; ++i) {
-                biquad_apply_buffer (&process_context.lowpass [i] [0], process_context.inbuffer + i, stream_samples_read, num_channels);
-                biquad_apply_buffer (&process_context.lowpass [i] [1], process_context.inbuffer + i, stream_samples_read, num_channels);
-            }
-
-        res = resampleProcessInterleaved (process_context.resampler, process_context.inbuffer, stream_samples_read, process_context.outbuffer, process_context.outbuffer_samples, process_context.sample_ratio);
-        samples_generated = res.output_generated;
-
-        if (process_context.post_filter)
-            for (int i = 0; i < num_channels; ++i) {
-                biquad_apply_buffer (&process_context.lowpass [i] [0], process_context.outbuffer + i, samples_generated, num_channels);
-                biquad_apply_buffer (&process_context.lowpass [i] [1], process_context.outbuffer + i, samples_generated, num_channels);
-            }
-
-        // finally write the audio, converting to appropriate integer format if requested
-
-        if (outbits != 32) {
-            float scaler = (1 << outbits) / 2.0;
-            int32_t offset = (outbits <= 8) * 128;
-            int32_t highclip = (1 << (outbits - 1)) - 1;
-            int32_t lowclip = ~highclip;
-            int leftshift = (24 - outbits) % 8;
-            int i, j;
-
-            for (i = j = 0; i < samples_generated * num_channels; ++i) {
-                int chan = i % num_channels;
-                int32_t output = floor ((process_context.outbuffer [i] *= scaler) - process_context.error [chan] + tpdf_dither (chan, -1) + 0.5);
-
-                if (output > highclip) {
-                	process_context.clipped_samples++;
-                    output = highclip;
-                }
-                else if (output < lowclip) {
-                	process_context.clipped_samples++;
-                    output = lowclip;
-                }
-
-                process_context.error [chan] += output - process_context.outbuffer [i];
-                process_context.tmpbuffer [j++] = output = (output << leftshift) + offset;
-
-                if (outbits > 8) {
-                	process_context.tmpbuffer [j++] = output >> 8;
-
-                    if (outbits > 16)
-                    	process_context.tmpbuffer [j++] = output >> 16;
-                }
-            }
-
-            int stream_write_size = num_channels * ((outbits + 7) / 8);
-
-            fwrite_stream (process_context.tmpbuffer, stream_write_size, samples_generated);
-        }
-
-        process_context.output_samples += samples_generated;
-
-        if (progress_divider) {
-            int new_percent = 100 - process_context.remaining_samples / progress_divider;
-
-            if (new_percent != percent) {
-                fprintf (stderr, "\rprogress: %d%% ", percent = new_percent);
-                fflush (stderr);
-            }
-        }
-    }
-
-    if (verbosity >= 0)
-        fprintf (stderr, "\r...completed successfully\n");
-
     resampleFree (process_context.resampler);
     tpdf_dither_free ();
     free (process_context.inbuffer);
@@ -376,4 +217,173 @@ unsigned int process_audio (unsigned long num_samples)
         fprintf (stderr, "warning: file terminated early!\n");
 
     return process_context.output_samples;
+}
+
+unsigned int process_audio_block (uint32_t stream_samples_read)
+{
+    ResampleResult res;
+	if (inbits <= 8) {
+		float gain_factor = process_context.gain / 128.0;
+		int i;
+
+		for (i = 0; i < stream_samples_read * num_channels; ++i)
+			process_context.inbuffer [i] = ((int) process_context.tmpbuffer [i] - 128) * gain_factor;
+	}
+	else if (inbits <= 16) {
+		float gain_factor = process_context.gain / 32768.0;
+		int i, j;
+
+		for (i = j = 0; i < stream_samples_read * num_channels; ++i) {
+			int16_t value = process_context.tmpbuffer [j++];
+			value += process_context.tmpbuffer [j++] << 8;
+			process_context.inbuffer [i] = value * gain_factor;
+		}
+	}
+	else if (inbits <= 24) {
+		float gain_factor = process_context.gain / 8388608.0;
+		int i, j;
+
+		for (i = j = 0; i < stream_samples_read * num_channels; ++i) {
+			int32_t value = process_context.tmpbuffer [j++];
+			value += process_context.tmpbuffer [j++] << 8;
+			value += (int32_t) (signed char) process_context.tmpbuffer [j++] << 16;
+			process_context.inbuffer [i] = value * gain_factor;
+		}
+	}
+	else {
+		if (IS_BIG_ENDIAN) {
+			unsigned char *bptr = (unsigned char *) process_context.inbuffer, word [4];
+			int wcount = stream_samples_read * num_channels;
+
+			while (wcount--) {
+				memcpy (word, bptr, 4);
+				*bptr++ = word [3];
+				*bptr++ = word [2];
+				*bptr++ = word [1];
+				*bptr++ = word [0];
+			}
+		}
+
+		if (process_context.gain != 1.0)
+			for (int i = 0; i < stream_samples_read * num_channels; ++i)
+				process_context.inbuffer [i] *= process_context.gain;
+	}
+
+	// common code to process the audio in 32-bit floats
+
+	if (process_context.pre_filter)
+		for (int i = 0; i < num_channels; ++i) {
+			biquad_apply_buffer (&process_context.lowpass [i] [0], process_context.inbuffer + i, stream_samples_read, num_channels);
+			biquad_apply_buffer (&process_context.lowpass [i] [1], process_context.inbuffer + i, stream_samples_read, num_channels);
+		}
+
+	res = resampleProcessInterleaved (process_context.resampler, process_context.inbuffer, stream_samples_read, process_context.outbuffer, process_context.outbuffer_samples, process_context.sample_ratio);
+	uint32_t samples_generated = res.output_generated;
+
+	if (process_context.post_filter)
+		for (int i = 0; i < num_channels; ++i) {
+			biquad_apply_buffer (&process_context.lowpass [i] [0], process_context.outbuffer + i, samples_generated, num_channels);
+			biquad_apply_buffer (&process_context.lowpass [i] [1], process_context.outbuffer + i, samples_generated, num_channels);
+		}
+
+	// finally write the audio, converting to appropriate integer format if requested
+
+	if (outbits != 32) {
+		float scaler = (1 << outbits) / 2.0;
+		int32_t offset = (outbits <= 8) * 128;
+		int32_t highclip = (1 << (outbits - 1)) - 1;
+		int32_t lowclip = ~highclip;
+		int leftshift = (24 - outbits) % 8;
+		int i, j;
+
+		for (i = j = 0; i < samples_generated * num_channels; ++i) {
+			int chan = i % num_channels;
+			int32_t output = floor ((process_context.outbuffer [i] *= scaler) - process_context.error [chan] + tpdf_dither (chan, -1) + 0.5);
+
+			if (output > highclip) {
+				process_context.clipped_samples++;
+				output = highclip;
+			}
+			else if (output < lowclip) {
+				process_context.clipped_samples++;
+				output = lowclip;
+			}
+
+			process_context.error [chan] += output - process_context.outbuffer [i];
+			process_context.tmpbuffer [j++] = output = (output << leftshift) + offset;
+
+			if (outbits > 8) {
+				process_context.tmpbuffer [j++] = output >> 8;
+
+				if (outbits > 16)
+					process_context.tmpbuffer [j++] = output >> 16;
+			}
+		}
+
+		int stream_write_size = num_channels * ((outbits + 7) / 8);
+
+		fwrite_stream (process_context.tmpbuffer, stream_write_size, samples_generated);
+	}
+
+	process_context.output_samples += samples_generated;
+
+	return samples_generated;
+}
+
+unsigned int process_audio(unsigned long num_samples)
+{
+	process_audio_init();
+
+    uint32_t progress_divider = 0, percent;
+
+    if (verbosity >= 0 && process_context.remaining_samples > 1000) {
+        progress_divider = (process_context.remaining_samples + 50) / 100;
+        fprintf (stderr, "\rprogress: %d%% ", percent = 0); fflush (stderr);
+    }
+
+    while (process_context.remaining_samples + process_context.samples_to_append)
+	{
+        // first we read the audio data, converting to 32-bit float (if not already) and applying gain
+        unsigned long samples_to_read = process_context.remaining_samples, stream_samples_read;
+
+        if (samples_to_read > BUFFER_SAMPLES)
+            samples_to_read = BUFFER_SAMPLES;
+
+        int stream_read_size = num_channels * ((inbits + 7) / 8);
+
+        stream_samples_read = fread_stream(process_context.readbuffer, stream_read_size, samples_to_read);
+
+        process_context.remaining_samples -= stream_samples_read;
+
+        if (!stream_samples_read)
+        {
+            int samples_to_append_now = process_context.samples_to_append;
+
+            if (!samples_to_append_now)
+                break;
+
+            if (samples_to_append_now > BUFFER_SAMPLES)
+                samples_to_append_now = BUFFER_SAMPLES;
+
+            memset (process_context.readbuffer, (inbits <= 8) * 128, samples_to_append_now * num_channels * ((inbits + 7) / 8));
+            stream_samples_read = samples_to_append_now;
+            process_context.samples_to_append -= samples_to_append_now;
+        }
+
+        process_audio_block (stream_samples_read);
+
+        if (progress_divider) {
+            int new_percent = 100 - process_context.remaining_samples / progress_divider;
+
+            if (new_percent != percent) {
+                fprintf (stderr, "\rprogress: %d%% ", percent = new_percent);
+                fflush (stderr);
+            }
+        }
+
+	}
+
+	process_audio_deinit();
+
+	return 0;
 }
