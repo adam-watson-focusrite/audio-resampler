@@ -78,6 +78,8 @@ uint16_t process_audio_init()
 
 	process_context.verbosity=1;
 
+	process_context.BUFFER_SAMPLES = 441;
+
 	process_context.num_channels=ART_STREAM_NUM_CHANNELS;
 	process_context.outbits=16;
 	process_context.inbits=16;
@@ -90,11 +92,15 @@ uint16_t process_audio_init()
 	process_context.sample_ratio = (double) process_context.resample_rate / (double)process_context.sample_rate;
 	process_context.lowpass_ratio = 1.0;
 
-	process_context.outbuffer_samples = (int) floor (BUFFER_SAMPLES * process_context.sample_ratio * 1.1 + 100.0);
-	process_context.remaining_samples = process_context.num_samples, process_context.output_samples = 0, process_context.clipped_samples = 0;
+	process_context.outbuffer_samples = (int) floor (process_context.BUFFER_SAMPLES * process_context.sample_ratio * 1.1 + 100.0);
+	process_context.remaining_samples = process_context.num_samples;
+	process_context.output_samples = 0;
+#ifdef ART_STREAM_CLIP_CHECK
+	process_context.clipped_samples = 0;
+#endif
 
 	process_context.outbuffer = malloc (process_context.outbuffer_samples * process_context.num_channels * sizeof (float));
-	process_context.inbuffer = malloc (BUFFER_SAMPLES * process_context.num_channels * sizeof (float));
+	process_context.inbuffer = malloc (process_context.BUFFER_SAMPLES * process_context.num_channels * sizeof (float));
 
 	process_context.flags = process_context.interpolate ? SUBSAMPLE_INTERPOLATE : 0;
     process_context.samples_to_append = process_context.num_taps / 2;
@@ -182,9 +188,9 @@ uint16_t process_audio_init()
     }
 
     if (process_context.inbits != 32 || process_context.outbits != 32) {
-        int max_samples = BUFFER_SAMPLES, max_bytes = 2;
+        int max_samples = process_context.BUFFER_SAMPLES, max_bytes = 2;
 
-        if (process_context.outbuffer_samples > BUFFER_SAMPLES)
+        if (process_context.outbuffer_samples > process_context.BUFFER_SAMPLES)
             max_samples = process_context.outbuffer_samples;
 
         if (process_context.inbits > 16 || process_context.outbits > 16)
@@ -210,8 +216,10 @@ uint16_t process_audio_deinit()
     free (process_context.outbuffer);
     free (process_context.tmpbuffer);
 
+#ifdef ART_STREAM_CLIP_CHECK
     if (process_context.clipped_samples)
         fprintf (stderr, "warning: %u samples were clipped, suggest reducing gain!\n", process_context.clipped_samples);
+#endif
 
     if (process_context.remaining_samples)
         fprintf (stderr, "warning: file terminated early!\n");
@@ -265,8 +273,10 @@ uint16_t process_audio_block (uint32_t stream_samples_read)
 		}
 
 		if (process_context.gain != 1.0)
+		{
 			for (int i = 0; i < stream_samples_read * process_context.num_channels; ++i)
 				process_context.inbuffer [i] *= process_context.gain;
+		}
 	}
 
 	// common code to process the audio in 32-bit floats
@@ -291,8 +301,10 @@ uint16_t process_audio_block (uint32_t stream_samples_read)
 	if (process_context.outbits != 32) {
 		float scaler = (1 << process_context.outbits) / 2.0;
 		int32_t offset = (process_context.outbits <= 8) * 128;
+#ifdef ART_STREAM_CLIP_CHECK
 		int32_t highclip = (1 << (process_context.outbits - 1)) - 1;
 		int32_t lowclip = ~highclip;
+#endif
 		int leftshift = (24 - process_context.outbits) % 8;
 		int i, j;
 
@@ -300,14 +312,18 @@ uint16_t process_audio_block (uint32_t stream_samples_read)
 			int chan = i % process_context.num_channels;
 			int32_t output = floor ((process_context.outbuffer [i] *= scaler) - process_context.error [chan] + tpdf_dither (chan, -1) + 0.5);
 
-			if (output > highclip) {
+#ifdef ART_STREAM_CLIP_CHECK
+			if (output > highclip)
+			{
 				process_context.clipped_samples++;
 				output = highclip;
 			}
-			else if (output < lowclip) {
+			else if (output < lowclip)
+			{
 				process_context.clipped_samples++;
 				output = lowclip;
 			}
+#endif
 
 			process_context.error [chan] += output - process_context.outbuffer [i];
 			process_context.tmpbuffer [j++] = output = (output << leftshift) + offset;
@@ -343,8 +359,8 @@ uint16_t process_audio()
         // first we read the audio data, converting to 32-bit float (if not already) and applying gain
         unsigned long samples_to_read = process_context.remaining_samples, stream_samples_read;
 
-        if (samples_to_read > BUFFER_SAMPLES)
-            samples_to_read = BUFFER_SAMPLES;
+        if (samples_to_read > process_context.BUFFER_SAMPLES)
+            samples_to_read = process_context.BUFFER_SAMPLES;
 
         int stream_read_size = process_context.num_channels * ((process_context.inbits + 7) / 8);
 
@@ -362,8 +378,8 @@ uint16_t process_audio()
                 break;
             }
 
-            if (samples_to_append_now > BUFFER_SAMPLES)
-                samples_to_append_now = BUFFER_SAMPLES;
+            if (samples_to_append_now > process_context.BUFFER_SAMPLES)
+                samples_to_append_now = process_context.BUFFER_SAMPLES;
 
             memset (process_context.readbuffer, (process_context.inbits <= 8) * 128, samples_to_append_now * process_context.num_channels * ((process_context.inbits + 7) / 8));
             stream_samples_read = samples_to_append_now;

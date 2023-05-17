@@ -380,7 +380,7 @@ static int wav_process (char *infilename, char *outfilename)
             }
 
             if (process_context.verbosity > 0)
-                fprintf (stderr, "num samples = %lu\n", process_context.num_samples);
+                fprintf (stderr, "num samples = %u\n", process_context.num_samples);
 
             process_context.num_channels = WaveHeader.NumChannels;
             process_context.sample_rate = WaveHeader.SampleRate;

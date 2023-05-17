@@ -8,7 +8,8 @@
 #define IS_BIG_ENDIAN (*(uint16_t *)"\0\xff" < 0x0100)
 
 #define ART_STREAM_NUM_CHANNELS 2
-#define BUFFER_SAMPLES          441
+#define ART_STREAM_CLIP_CHECK
+
 
 typedef struct
 {
@@ -26,7 +27,11 @@ typedef struct
     uint32_t outbuffer_samples;
     uint32_t remaining_samples;
     uint32_t output_samples;
+
+#ifdef ART_STREAM_CLIP_CHECK
     uint32_t clipped_samples;
+#endif
+
     uint32_t num_samples;
 
     float *outbuffer;
@@ -56,6 +61,8 @@ typedef struct
     Resample *resampler;
 
     float error [ART_STREAM_NUM_CHANNELS];
+
+    uint32_t BUFFER_SAMPLES;
 
     FILE* in_stream;
     FILE* out_stream;
