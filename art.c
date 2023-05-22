@@ -62,8 +62,8 @@ int main (argc, argv) int argc; char **argv;
             while (*++*argv)
                 switch (**argv) {
 
-		    case '1':
-		    	process_context.num_filters = process_context.num_taps = 16;
+			case '1':
+				process_context.num_filters = process_context.num_taps = 16;
 			break;
 
 		    case '2':

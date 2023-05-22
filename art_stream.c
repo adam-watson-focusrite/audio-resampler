@@ -85,8 +85,8 @@ uint16_t art_resample_init()
 	process_context.inbits=16;
 
 
-	process_context.num_taps=16;
-	process_context.num_filters=16;
+	process_context.num_taps=4;
+	process_context.num_filters=2;
 	process_context.gain=1.0;
 
 	process_context.sample_ratio = (double) process_context.resample_rate / (double)process_context.sample_rate;
