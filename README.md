@@ -1,5 +1,8 @@
 ## AUDIO-RESAMPLER
 
+## A fork of the art-resampler I was trying - hack to have a context structure and min number of taps/filters - I used eclipse + gcc to build it as it was not happy in vs code/studio with its standard c/c++ compiler
+
+
 Audio Resampling Engine & Command-Line Tool
 
 Copyright (c) 2022 David Bryant.
